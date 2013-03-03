@@ -21,7 +21,7 @@ This will become our two dimensional grid when we concretize it.
 >   deriving Show
 
 As usual we make this into a functor by using the functor instance of
-the underlying array.
+the underlying array.b
 
 > instance Ix i => Functor (PointedArray i) where
 >   fmap f (PointedArray i a) = PointedArray i (fmap f a)
@@ -59,6 +59,53 @@ Let's be explicit about our neighbours.
 >                                , northWest :: a
 >                                }
 >                   deriving Show
+>
+> toList :: Neighbours a -> [a]
+> toList (Neighbours x1 x2 x3 x4 x5 x6 x7 x8) = x1:x2:x3:x4:x5:x6:x7:x8:[]
+>
+> type NumNeighbours a = Int -> Int -> PointedArray (Int, Int) a
+>                        -> Neighbours a
+>
+> numNeighbours :: NumNeighbours Liveness
+>                  -> PointedArray (Int, Int) Liveness
+>                  -> Int
+> numNeighbours ns p = length $
+>                      filter (== Alive) $
+>                      toList $
+>                      ns mMax nMax p
+
+Now we can implement the rules.
+
+> f :: NumNeighbours Liveness ->
+>      PointedArray (Int, Int) Liveness ->
+>      Liveness
+> f ns p@(PointedArray (i, j) x)
+>   |  x!(i, j) == Alive && (numNeighbours ns p < 2)
+>   = Dead
+> f ns p@(PointedArray (i, j) x)
+>   |  x!(i, j) == Alive && (numNeighbours ns p `elem` [2, 3])
+>   = Alive
+> f ns p@(PointedArray (i, j) x)
+>   |  x!(i, j) == Alive && (numNeighbours ns p > 3)
+>   = Dead
+> f ns p@(PointedArray (i, j) x)
+>   |  x!(i, j) == Dead && (numNeighbours ns p == 3)
+>   = Alive
+> f _  (PointedArray (i, j) x)
+>   = x!(i, j)
+
+Let's create a glider which will move around our manifold.
+
+> glider :: PointedArray (Int, Int) Liveness
+> glider = PointedArray (0, 0) xs
+>   where
+>     ys = listArray ((0, 0), (mMax - 1, nMax - 1)) $ repeat Dead
+>     xs = ys // [ ((2, 4), Alive)
+>                , ((3, 3), Alive)
+>                , ((1, 2), Alive)
+>                , ((2, 2), Alive)
+>                , ((3, 2), Alive)
+>                ]
 
 We can't have an infinite grid with an array but we can make our game
 of life take place on a torus rather than the plane. This way we don't
@@ -78,10 +125,29 @@ have problems with boundary conditions.
 >     , northWest = x!((i - 1) `mod` mMax, (j + 1) `mod` nMax)
 >     }
 
+We can see that the glider reappears at the same place at iterations 21 and 41.
+
+```{.dia width='600'}
+dia = vcat $ map hcat gridss
+  where
+    grids = zipWith (\x n -> (dispNum n # scale 0.2 # translate (r2 (0.6, 1.2)))
+                             <> background
+                             <> (renderLife x # translate (r2 (0.1, 0.1))))
+            (iterate (=>> (f neighbours)) glider) [1..]
+    dispNum n = text (show n) <> square 1 # lw 0
+    gridss = take 6 $ groups 7 grids
+    groups n = unfoldr f
+      where
+        f :: [a] -> Maybe ([a], [a])
+        f [] = Nothing
+        f xs = Just (take n xs, drop n xs)
+```
+
 We don't have to use a torus. For example, we can use a Klein bottle
 which is non-orientable surface.
 
-> neighboursKlein :: Int -> Int -> PointedArray (Int, Int) a -> Neighbours a
+> neighboursKlein :: Int -> Int -> PointedArray (Int, Int) a
+>                    -> Neighbours a
 > neighboursKlein mMax nMax (PointedArray (i, j) x) =
 >   Neighbours
 >     {
@@ -95,55 +161,28 @@ which is non-orientable surface.
 >     , northWest = northWest' i j
 >     }
 >   where
->     north'     i j | j < nMax - 1 = x!(i,                                j + 1)
->                    | otherwise    = x!(mMax - 1 - i,                         0)
->     northEast' i j | j < nMax - 1 = x!((i + 1) `mod` mMax,               j + 1)
->                    | otherwise    = x!(mMax - 1 - (i + 1) `mod` mMax,        0)
->     southEast' i j | j > 0        = x!((i + 1) `mod` mMax,               j - 1)
->                    | otherwise    = x!(mMax - 1 - (i + 1) `mod` mMax, nMax - 1)
->     south'     i j | j > 0        = x!(i,                                j - 1)
->                    | otherwise    = x!(mMax - 1 - i,                  nMax - 1)
->     southWest' i j | j > 0        = x!((i - 1) `mod` mMax,               j - 1)
->                    | otherwise    = x!(mMax - 1 - (i - 1) `mod` mMax, nMax - 1)
->     northWest' i j | j < nMax - 1 = x!((i - 1) `mod` mMax,               j + 1)
->                    | otherwise    = x!(mMax - 1 - (i - 1) `mod` mMax,        0)
+>     north'     i j
+>       | j < nMax - 1 = x!(i,                                j + 1)
+>       | otherwise    = x!(mMax - 1 - i,                         0)
+>     northEast' i j
+>       | j < nMax - 1 = x!((i + 1) `mod` mMax,               j + 1)
+>       | otherwise    = x!(mMax - 1 - (i + 1) `mod` mMax,        0)
+>     southEast' i j
+>       | j > 0        = x!((i + 1) `mod` mMax,               j - 1)
+>       | otherwise    = x!(mMax - 1 - (i + 1) `mod` mMax, nMax - 1)
+>     south'     i j
+>       | j > 0        = x!(i,                                j - 1)
+>       | otherwise    = x!(mMax - 1 - i,                  nMax - 1)
+>     southWest' i j
+>       | j > 0        = x!((i - 1) `mod` mMax,               j - 1)
+>       | otherwise    = x!(mMax - 1 - (i - 1) `mod` mMax, nMax - 1)
+>     northWest' i j
+>       | j < nMax - 1 = x!((i - 1) `mod` mMax,               j + 1)
+>       | otherwise    = x!(mMax - 1 - (i - 1) `mod` mMax,        0)
 
-> toList :: Neighbours a -> [a]
-> toList (Neighbours x1 x2 x3 x4 x5 x6 x7 x8) = x1:x2:x3:x4:x5:x6:x7:x8:[]
-
-> numNeighbours :: PointedArray (Int, Int) Liveness -> Int
-> numNeighbours p = length $ filter (== Alive) $ toList $ neighboursKlein mMax nMax p
-
-Now we can implement the rules.
-
-> f :: PointedArray (Int, Int) Liveness -> Liveness
-> f p@(PointedArray (i, j) x)
->   |  x!(i, j) == Alive && (numNeighbours p < 2)
->   = Dead
-> f p@(PointedArray (i, j) x)
->   |  x!(i, j) == Alive && (numNeighbours p `elem` [2, 3])
->   = Alive
-> f p@(PointedArray (i, j) x)
->   |  x!(i, j) == Alive && (numNeighbours p > 3)
->   = Dead
-> f p@(PointedArray (i, j) x)
->   |  x!(i, j) == Dead && (numNeighbours p == 3)
->   = Alive
-> f   (PointedArray (i, j) x)
->   = x!(i, j)
-
-Let's create a glider which will move around our manifold.
-
-> glider :: PointedArray (Int, Int) Liveness
-> glider = PointedArray (0, 0) xs
->   where
->     ys = listArray ((0, 0), (mMax - 1, nMax - 1)) $ repeat Dead
->     xs = ys // [ ((2, 4), Alive)
->                , ((3, 3), Alive)
->                , ((1, 2), Alive)
->                , ((2, 2), Alive)
->                , ((3, 2), Alive)
->                ]
+We can see that the glider reappears in the same place at iteration 21
+with its left and right sides swapped and that it reappears in the
+same place at iteration 41 with its original handedness.
 
 ```{.dia width='600'}
 dia = vcat $ map hcat gridss
@@ -151,7 +190,7 @@ dia = vcat $ map hcat gridss
     grids = zipWith (\x n -> (dispNum n # scale 0.2 # translate (r2 (0.6, 1.2)))
                              <> background
                              <> (renderLife x # translate (r2 (0.1, 0.1))))
-            (iterate (=>> f) glider) [1..]
+            (iterate (=>> (f neighboursKlein)) glider) [1..]
     dispNum n = text (show n) <> square 1 # lw 0
     gridss = take 6 $ groups 7 grids
     groups n = unfoldr f
@@ -160,8 +199,6 @@ dia = vcat $ map hcat gridss
         f [] = Nothing
         f xs = Just (take n xs, drop n xs)
 ```
-
-Blah blah blah
 
     [dia-def]
 
@@ -249,23 +286,30 @@ Blah blah blah
     toList :: Neighbours a -> [a]
     toList (Neighbours x1 x2 x3 x4 x5 x6 x7 x8) = x1:x2:x3:x4:x5:x6:x7:x8:[]
 
-    numNeighbours :: PointedArray (Int, Int) Liveness -> Int
-    numNeighbours p = length $ filter (== Alive) $ toList $ neighboursKlein mMax nMax p
+    type NumNeighbours a = Int -> Int -> PointedArray (Int, Int) a -> Neighbours a
 
-    f :: PointedArray (Int, Int) Liveness -> Liveness
-    f p@(PointedArray (i, j) x)
-      |  x!(i, j) == Alive && (numNeighbours p < 2)
+    numNeighbours :: NumNeighbours Liveness
+                     -> PointedArray (Int, Int) Liveness
+                     -> Int
+    numNeighbours ns p = length $ filter (== Alive) $ toList $ ns mMax nMax p
+
+
+    f :: NumNeighbours Liveness ->
+         PointedArray (Int, Int) Liveness ->
+         Liveness
+    f ns p@(PointedArray (i, j) x)
+      |  x!(i, j) == Alive && (numNeighbours ns p < 2)
       = Dead
-    f p@(PointedArray (i, j) x)
-      |  x!(i, j) == Alive && (numNeighbours p `elem` [2, 3])
+    f ns p@(PointedArray (i, j) x)
+      |  x!(i, j) == Alive && (numNeighbours ns p `elem` [2, 3])
       = Alive
-    f p@(PointedArray (i, j) x)
-      |  x!(i, j) == Alive && (numNeighbours p > 3)
+    f ns p@(PointedArray (i, j) x)
+      |  x!(i, j) == Alive && (numNeighbours ns p > 3)
       = Dead
-    f p@(PointedArray (i, j) x)
-      |  x!(i, j) == Dead && (numNeighbours p == 3)
+    f ns p@(PointedArray (i, j) x)
+      |  x!(i, j) == Dead && (numNeighbours ns p == 3)
       = Alive
-    f   (PointedArray (i, j) x)
+    f _  (PointedArray (i, j) x)
       = x!(i, j)
 
     glider :: PointedArray (Int, Int) Liveness
@@ -295,19 +339,12 @@ Blah blah blah
         blink x y |  arr!(x, y) == Alive = blue
                   | otherwise            = red
 
-```{.dia width='600'}
-dia = vcat $ map hcat gridss
-  where
-    grids = zipWith (\x n -> (dispNum n # scale 0.2 # translate (r2 (0.6, 1.2)))
-                             <> background
-                             <> (renderLife x # translate (r2 (0.1, 0.1))))
-            (iterate (=>> f) glider) [1..]
-    dispNum n = text (show n) <> square 1 # lw 0
-    gridss = take 6 $ groups 7 grids
-    groups n = unfoldr f
-      where
-        f :: [a] -> Maybe ([a], [a])
-        f [] = Nothing
-        f xs = Just (take n xs, drop n xs)
-```
+If you wish to run the code yourself, you will need to do something
+like this:
+
+>
+> testGrids = take 10 $ iterate (=>> (f neighbours)) glider
+>
+
+It is somewhat difficult to determine what is going on from the raw data structures themselves; it is easier to see what is happening using some form of diagram. I f you wish to do this, the full code and text are available [here](http://example.com/ "github repo").
 
